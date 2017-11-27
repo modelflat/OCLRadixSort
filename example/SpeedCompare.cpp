@@ -9,7 +9,7 @@ int main() {
     std::cout << "generating keys...." << std::endl;
 
     // TODO implement variety of sizes
-    std::vector<SimpleRadixSort64bit::KeyType > v ( 1 << 25 );
+    std::vector<SimpleRadixSort64bit::KeyType > v ( 1 << 20 );
 
     auto rng = makeRng( rs.maxValue() );
     std::generate( v.begin(), v.end(), rng );

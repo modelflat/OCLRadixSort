@@ -90,6 +90,7 @@ inline SIZE index(SIZE i, SIZE n) {
 // when providing options to CL C compiler
 static constexpr const char* _src_kernelHistogram =
 R"CLC(
+__attribute__((vec_type_hint(KEY_TYPE)))
 kernel void histogram(
 // in
     const global KEY_TYPE *keys,
@@ -104,6 +105,9 @@ kernel void histogram(
     const uint item   = get_local_id (0);
     const uint i_g    = get_global_id(0);
 
+#if (__OPENCL_VERSION__ >= 200)
+    __attribute__((opencl_unroll_hint(_RADIX)))
+#endif
     for (int i = 0; i < _RADIX; ++i) { histograms[i * _ITEMS + item] = 0; }
     barrier(CLK_LOCAL_MEM_FENCE);
 
@@ -117,6 +121,9 @@ kernel void histogram(
     }
     barrier(CLK_LOCAL_MEM_FENCE);
 
+#if (__OPENCL_VERSION__ >= 200)
+    __attribute__((opencl_unroll_hint(_RADIX)))
+#endif
     for (int i = 0; i < _RADIX; ++i) {
         global_histograms[i * _GROUPS * _ITEMS + _ITEMS * group + item] = histograms[i * _ITEMS + item];
     }
@@ -126,6 +133,7 @@ kernel void histogram(
 // this kernel updates histograms with global sum after scan
 static constexpr const char* _src_kernelMerge =
 R"CLC(
+__attribute__((vec_type_hint(KEY_TYPE)))
 kernel void merge(
 // in
     const global KEY_TYPE *sum,
@@ -142,13 +150,13 @@ kernel void merge(
 
 static constexpr const char* _src_kernelTranspose =
 R"CLC(
+__attribute__((vec_type_hint(KEY_TYPE)))
 kernel void transpose(
 // in
         const global KEY_TYPE *keysIn,
         const global INDEX_TYPE *permutationIn,
         const SIZE colCount,
         const SIZE rowCount,
-        const int tileSize,
 // out
         global KEY_TYPE *keysOut,
         global INDEX_TYPE *permutationOut,
@@ -156,26 +164,33 @@ kernel void transpose(
         local KEY_TYPE *blockmat,
         local INDEX_TYPE *blockperm
 ) {
-    const int i0      = get_global_id(0) * tileSize;  // first row index
+    const int i0      = get_global_id(0) * _TILESIZE;  // first row index
     const int j       = get_global_id(1);             // column index
     const int j_local = get_local_id(1);              // local column index
 
-    for (int i = 0; i < tileSize; ++i) {
+#if (__OPENCL_VERSION__ >= 200)
+    __attribute__((opencl_unroll_hint(_TILESIZE)))
+#endif
+    for (int i = 0; i < _TILESIZE; ++i) {
         const int k = (i0 + i) * colCount + j;
-        blockmat [i * tileSize + j_local] = keysIn[k];
+        blockmat [i * _TILESIZE + j_local] = keysIn[k];
 #ifdef COMPUTE_PERMUTATION
-        blockperm[i * tileSize + j_local] = permutationIn[k];
+        blockperm[i * _TILESIZE + j_local] = permutationIn[k];
 #endif
     }
 
     barrier(CLK_LOCAL_MEM_FENCE);
 
-    const int j0 = get_group_id(1) * tileSize;
-    for (int i = 0; i < tileSize; ++i) {
+
+    const int j0 = get_group_id(1) * _TILESIZE;
+#if (__OPENCL_VERSION__ >= 200)
+    __attribute__((opencl_unroll_hint(_TILESIZE)))
+#endif
+    for (int i = 0; i < _TILESIZE; ++i) {
         const int k = (j0 + i) * rowCount + i0 + j_local;
-        keysOut[k]        = blockmat [j_local * tileSize + i];
+        keysOut[k]        = blockmat [j_local * _TILESIZE + i];
 #ifdef COMPUTE_PERMUTATION
-        permutationOut[k] = blockperm[j_local * tileSize + i];
+        permutationOut[k] = blockperm[j_local * _TILESIZE + i];
 #endif
     }
 }
@@ -184,6 +199,7 @@ kernel void transpose(
 // see Blelloch 1990
 static constexpr const char* _src_kernelScan =
 R"CLC(
+__attribute__((vec_type_hint(KEY_TYPE)))
 kernel void scan(
 // in-out
     global KEY_TYPE *input,
@@ -242,6 +258,7 @@ kernel void scan(
 
 static constexpr const char* _src_kernelReorder =
 R"CLC(
+__attribute__((vec_type_hint(KEY_TYPE)))
 kernel void reorder(
 // in
     const global KEY_TYPE *keysIn,
@@ -261,6 +278,9 @@ kernel void reorder(
     const SIZE size = length / (_GROUPS * _ITEMS);
     const SIZE start = get_global_id(0) * size;
 
+#if (__OPENCL_VERSION__ >= 200)
+    __attribute__((opencl_unroll_hint(_RADIX)))
+#endif
     for (int i = 0; i < _RADIX; ++i) {
         local_histograms[i * _ITEMS + item] = histograms[i * _GROUPS * _ITEMS + _ITEMS * group + item];
     }
@@ -599,11 +619,11 @@ class RadixSortBase {
         char options[200]; // todo prettify
         sprintf_s(options, 200,
                   " -w "
-                  "-D _RADIX=%d -D _BITS=%d -D _GROUPS=%d -D _ITEMS=%d "
+                  "-D _RADIX=%d -D _BITS=%d -D _GROUPS=%d -D _ITEMS=%d -D _TILESIZE=%d"
                   "%s %s %s "
                   "-D KEY_TYPE=%s -D INDEX_TYPE=%s "
                 ,
-                  radix, bits, groups_, items_,
+                  radix, bits, groups_, items_, tileSize,
                   transpose_ ? "-D TRANSPOSE" : "",
                   computePermutation ? "-D COMPUTE_PERMUTATION" : "",
                   HOST_PTR_IS_32bit ? "-D HOST_PTR_IS_32bit" : "",

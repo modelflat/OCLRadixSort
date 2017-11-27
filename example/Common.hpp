@@ -56,7 +56,7 @@ using T = unsigned long long int;
 // type of indices
 using TI = T;
 // radix sort template configuration
-using SimpleRadixSort64bit = RadixSort<8, 64, T, TI, 128, 4, true, 256, false, 32, true>;
+using SimpleRadixSort64bit = RadixSort<8, 40, T, TI, 128, 4, true, 256, false, 32, true>;
 
 
 #endif //OCLRADIXSORT_TESTCOMMON_HPP_H
