@@ -342,7 +342,7 @@ class RadixSortBase {
     using HistogramType = _DataType;
 
     const cl::Context ctx;
-    cl::Device device;
+    const cl::Device device;
 
     cl::CommandQueue queue;
     cl::Program program;
@@ -364,7 +364,7 @@ class RadixSortBase {
 
     std::unique_ptr<std::vector<_IndexType> > _permutation;
 
-    ProfilingInfo<ProfilingInfoType> _profilingInfo{0, 0, 0, 0};
+    ProfilingInfo<ProfilingInfoType> _profilingInfo;
 
     // helper vars
     bool bound = false;
@@ -400,8 +400,7 @@ class RadixSortBase {
             queue.enqueueWriteBuffer(keysIn, CL_TRUE,
                                             sizeof(_DataType) * size,
                                             sizeof(_DataType) * pad.size(),
-                                            pad.data())
-                   ;
+                                            pad.data());
         }
         keysOut = cl::Buffer {ctx, CL_MEM_READ_WRITE, sizeInBytes};
         queue.finish();
@@ -649,9 +648,9 @@ public:
      * @param ctx context
      * @param device device
      */
-    RadixSortBase(cl::Context ctx, cl::Device device) : ctx(ctx), device(device) {
-        queue = cl::CommandQueue {ctx, device,
-                                  enableProfiling ? CL_QUEUE_PROFILING_ENABLE : 0};
+    RadixSortBase(cl::Context ctx, cl::Device device)
+            : ctx(ctx), device(device), queue( cl::CommandQueue {ctx, device,
+                                                                 enableProfiling ? CL_QUEUE_PROFILING_ENABLE : 0 }) {
         _compileProgram( groups, items, transpose );
     }
 
@@ -682,7 +681,8 @@ public:
      * @brief Retrieve permutation vector built in the last call to sort()
      * @return permutation vector
      */
-    inline const std::vector<_IndexType> &permutation() const {
+    inline
+    typename std::enable_if<computePermutation, const std::vector<IndexType>&>::type permutation() const {
         return *_permutation;
     }
 
@@ -690,7 +690,7 @@ public:
      * @brief Max possible value of vector element for this radix sort instance
      * @return max value
      */
-    inline constexpr _DataType maxValue() const noexcept {
+    inline constexpr KeyType maxValue() const noexcept {
         return maxInt;
     }
 };
