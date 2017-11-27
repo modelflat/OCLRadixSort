@@ -661,7 +661,7 @@ public:
      * @param begin begin
      * @param end end
      */
-    template<bool rebind, typename Iter>
+    template<bool rebind = true, typename Iter>
     void sort(Iter begin, Iter end) {
         if (!bound || rebind) {
             _init(begin, end);
