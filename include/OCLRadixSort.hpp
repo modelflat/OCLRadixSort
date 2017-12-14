@@ -13,6 +13,8 @@
 #include <algorithm>
 #include <numeric>
 
+#include <string_view>
+
 #define HOST_PTR_IS_32bit (sizeof(size_t) < 8)
 
 template<size_t v>
@@ -63,9 +65,11 @@ inline void swap(cl::Buffer &a, cl::Buffer &b) {
     b = temp;
 }
 
-static constexpr const char* _src_other =
-R"CLC(
+using namespace std::literals::string_view_literals;
 
+static constexpr std::string_view _src_other
+{
+R"CLC(
 #ifdef HOST_PTR_IS_32bit
     #define SIZE uint
 #else
@@ -81,14 +85,15 @@ inline SIZE index(SIZE i, SIZE n) {
     return i;
 #endif
 }
-
-)CLC";
+)CLC"sv
+};
 
 // this kernel creates histograms from key vector
 // defines required: _RADIX (radix), _BITS (size of radix in bits)
 // it is possible to unroll 2 loops inside this kernel, take this into account
 // when providing options to CL C compiler
-static constexpr const char* _src_kernelHistogram =
+static constexpr std::string_view _src_kernelHistogram
+{
 R"CLC(
 __attribute__((vec_type_hint(KEY_TYPE)))
 kernel void histogram(
@@ -128,10 +133,12 @@ kernel void histogram(
         global_histograms[i * _GROUPS * _ITEMS + _ITEMS * group + item] = histograms[i * _ITEMS + item];
     }
 }
-)CLC";
+)CLC"sv
+};
 
 // this kernel updates histograms with global sum after scan
-static constexpr const char* _src_kernelMerge =
+static constexpr std::string_view _src_kernelMerge
+{
 R"CLC(
 __attribute__((vec_type_hint(KEY_TYPE)))
 kernel void merge(
@@ -146,9 +153,11 @@ kernel void merge(
     histogram[gid2]     += s;
     histogram[gid2 + 1] += s;
 }
-)CLC";
+)CLC"sv
+};
 
-static constexpr const char* _src_kernelTranspose =
+static constexpr std::string_view _src_kernelTranspose
+{
 R"CLC(
 __attribute__((vec_type_hint(KEY_TYPE)))
 kernel void transpose(
@@ -194,10 +203,12 @@ kernel void transpose(
 #endif
     }
 }
-)CLC";
+)CLC"sv
+};
 
 // see Blelloch 1990
-static constexpr const char* _src_kernelScan =
+static constexpr std::string_view _src_kernelScan
+{
 R"CLC(
 __attribute__((vec_type_hint(KEY_TYPE)))
 kernel void scan(
@@ -254,9 +265,11 @@ kernel void scan(
     input[gid2]     = temp[ item << 1 ];
     input[gid2 + 1] = temp[(item << 1) + 1];
 }
-)CLC";
+)CLC"sv
+};
 
-static constexpr const char* _src_kernelReorder =
+static constexpr std::string_view _src_kernelReorder
+{
 R"CLC(
 __attribute__((vec_type_hint(KEY_TYPE)))
 kernel void reorder(
@@ -301,7 +314,18 @@ kernel void reorder(
         //
     }
 }
-)CLC";
+)CLC"sv
+};
+
+static const cl::Program::Sources& _radixSortSources
+{
+        { _src_other.data(), _src_other.length() },
+        { _src_kernelHistogram.data(), _src_kernelHistogram.length() },
+        { _src_kernelMerge.data(), _src_kernelMerge.length() },
+        { _src_kernelReorder.data(), _src_kernelReorder.length() },
+        { _src_kernelScan.data(), _src_kernelScan.length() },
+        { _src_kernelTranspose.data(), _src_kernelTranspose.length() }
+};
 
 template<
         typename T,
@@ -605,17 +629,6 @@ class RadixSortBase {
     }
 
     void _compileProgram( size_t groups_, size_t items_, bool transpose_ ) {
-        static cl::Program::Sources _radixSortSources {
-                { _src_other, strlen( _src_other ) },
-                { _src_kernelHistogram, strlen(_src_kernelHistogram ) },
-                { _src_kernelMerge, strlen( _src_kernelMerge ) },
-                { _src_kernelReorder, strlen( _src_kernelReorder ) },
-                { _src_kernelScan, strlen( _src_kernelScan ) },
-                { _src_kernelTranspose, strlen( _src_kernelTranspose ) },
-        }; // TODO move to compile time?
-
-        program = cl::Program { ctx, _radixSortSources };
-
         char options[200]; // todo prettify
         sprintf_s(options, 200,
                   " -w "
@@ -670,7 +683,8 @@ public:
      */
     RadixSortBase(cl::Context ctx, cl::Device device)
             : ctx(ctx), device(device), queue( cl::CommandQueue {ctx, device,
-                                                                 enableProfiling ? CL_QUEUE_PROFILING_ENABLE : 0 }) {
+                                                                 enableProfiling ? CL_QUEUE_PROFILING_ENABLE : 0 }),
+              program( cl::Program { ctx, _radixSortSources } ) {
         _compileProgram( groups, items, transpose );
     }
 
