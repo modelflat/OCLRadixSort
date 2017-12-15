@@ -1,14 +1,12 @@
 #include "Common.hpp"
-#include <random>
 
 int main() {
 
     // create instance for device
     SimpleRadixSort64bit rs { getDevice() };
 
-    std::cout << "generating keys...." << std::endl;
-
-    std::vector<SimpleRadixSort64bit::KeyType > v ( 1 << 20 );
+    std::vector<SimpleRadixSort64bit::KeyType > v ( 1 << 25 );
+    std::cout << "generating " << v.size() << " keys...." << std::endl;
 
     auto rng = makeRng( rs.maxValue() );
     std::generate( v.begin(), v.end(), rng );

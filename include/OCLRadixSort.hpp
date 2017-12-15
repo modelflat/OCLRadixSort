@@ -14,8 +14,7 @@
 #include <numeric>
 
 #include <string_view>
-
-#define HOST_PTR_IS_32bit (sizeof(size_t) < 8)
+#include <sstream>
 
 template<size_t v>
 struct is_power_of_2 {
@@ -64,6 +63,34 @@ inline void swap(cl::Buffer &a, cl::Buffer &b) {
     a = b;
     b = temp;
 }
+
+template <typename T>
+struct Opt {
+    const char* name;
+    const T value;
+
+    Opt(const char* name, T value) : name(name), value(value) {}
+};
+
+namespace std {
+
+    template <typename T>
+    ostream& operator<<(ostream& stream, const Opt<T>& opt) {
+        return stream << "-D" << opt.name << '=' << opt.value;
+    }
+
+}
+
+template <typename ... OT>
+cl_int buildCLProgramWithOptions(const cl::Program& program, OT&& ...args) {
+    std::ostringstream stream { " " };
+    ((stream << args << ' '), ...);
+    if (sizeof(void*) < 8) {
+        stream << " -D HOST_PTR_IS_32bit ";
+    }
+    return program.build( stream.str().data() );
+}
+
 
 using namespace std::literals::string_view_literals;
 
@@ -354,14 +381,14 @@ template<
         typename _IndexType,
 
         size_t groups,              // TODO move this to runtime?
-        size_t items,
+        size_t items,               // todo same^
 
         bool computePermutation,
 
         size_t histosplit,
 
-        bool transpose,
-        size_t tileSize,
+        bool transpose,             // todo same^
+        size_t tileSize,            // todo same^
 
         bool enableProfiling,
 
@@ -628,41 +655,32 @@ class RadixSortBase {
         fromCL(queue, keysIn, begin, end);
     }
 
-    void _compileProgram( size_t groups_, size_t items_, bool transpose_ ) {
-        char options[200]; // todo prettify
-        sprintf_s(options, 200,
-                  " -w "
-                  "-D _RADIX=%d -D _BITS=%d -D _GROUPS=%d -D _ITEMS=%d -D _TILESIZE=%d"
-                  "%s %s %s "
-                  "-D KEY_TYPE=%s -D INDEX_TYPE=%s "
-                ,
-                  radix, bits, groups_, items_, tileSize,
-                  transpose_ ? "-D TRANSPOSE" : "",
-                  computePermutation ? "-D COMPUTE_PERMUTATION" : "",
-                  HOST_PTR_IS_32bit ? "-D HOST_PTR_IS_32bit" : "",
-                  cl_type_name<_DataType>::name(), cl_type_name<_IndexType>::name()
-        );
-
-        try {
-            if (program.build(options) != CL_SUCCESS) {
-                // todo throw smt meaningful?
-                std::cerr << "Error: Failed to build program executable!" << std::endl;
-                auto buildInfo = program.getBuildInfo<CL_PROGRAM_BUILD_LOG>(device);
-                std::cerr << buildInfo << std::endl;
-                assert(false && "Failed to build program!");
+    cl_int _recompileProgram() {
+        {
+            // try to build program with new parameters
+            cl_int err;
+            if ((err = buildCLProgramWithOptions(program,
+                                                 "-w",
+                                                 Opt {"_RADIX",     radix },
+                                                 Opt {"_BITS",      bits },
+                                                 Opt {"_GROUPS",    groups },
+                                                 Opt {"_ITEMS",     items },
+                                                 Opt {"_TILESIZE",  tileSize },
+                                                 Opt {"KEY_TYPE",   cl_type_name<_DataType>::name() },
+                                                 Opt {"INDEX_TYPE", cl_type_name<_IndexType>::name() },
+                                                 transpose ? "-D TRANSPOSE" : "",
+                                                 computePermutation ? "-D COMPUTE_PERMUTATION" : "")) != CL_SUCCESS) {
+                return err;
             }
-        } catch (const cl::Error& e) {
-            std::cerr << e.what() << ' ' << e.err() << std::endl;
-            auto buildInfo = program.getBuildInfo<CL_PROGRAM_BUILD_LOG>( device );
-            std::cerr << buildInfo << std::endl;
-            throw e;
         }
-
+        // recreate kernels
         kernelHistogram = cl::Kernel {program, "histogram"};
-        kernelScan =      cl::Kernel {program, "scan"};
-        kernelMerge =     cl::Kernel {program, "merge"};
-        kernelReorder =   cl::Kernel {program, "reorder"};
+        kernelScan      = cl::Kernel {program, "scan"};
+        kernelMerge     = cl::Kernel {program, "merge"};
+        kernelReorder   = cl::Kernel {program, "reorder"};
         kernelTranspose = cl::Kernel {program, "transpose"};
+
+        return CL_SUCCESS; // TODO what if exceptions are disabled and we fail to create kernels?
     }
 
 public:
@@ -685,7 +703,8 @@ public:
             : ctx(ctx), device(device), queue( cl::CommandQueue {ctx, device,
                                                                  enableProfiling ? CL_QUEUE_PROFILING_ENABLE : 0 }),
               program( cl::Program { ctx, _radixSortSources } ) {
-        _compileProgram( groups, items, transpose );
+        // perform initial program compilation
+        _recompileProgram();
     }
 
     /**

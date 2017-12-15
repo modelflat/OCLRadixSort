@@ -1,7 +1,3 @@
-//
-// Created by locale on 27.11.2017.
-//
-
 #ifndef OCLRADIXSORT_TESTCOMMON_HPP_H
 #define OCLRADIXSORT_TESTCOMMON_HPP_H
 
@@ -52,11 +48,11 @@ auto makeRng(T upperBound) {
 
 // sample Radix Sort configuration
 // type of keys
-using T = unsigned long long int;
+using T = unsigned /*long long*/ int;
 // type of indices
 using TI = T;
 // radix sort template configuration
-using SimpleRadixSort64bit = RadixSort<8, 40, T, TI, 128, 4, true, 256, false, 32, true>;
+using SimpleRadixSort64bit = RadixSort<8, 32, T, TI, 128, 4, true, 256, false, 32, true>;
 
 
 #endif //OCLRADIXSORT_TESTCOMMON_HPP_H
